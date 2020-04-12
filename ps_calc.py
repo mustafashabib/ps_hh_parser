@@ -9,48 +9,51 @@ from itertools import groupby
 
 # keep track of player's total winnings/losses/rake share
 player_details = {}
-
+init_pd_keys = ['num_wins', 'num_all_in_wins', 'num_all_in', 'rake', 'win', 'expense']
+   
 # helpers to add to the global player tracker
 def add_player_all_in(p_name):
+    global player_details
     if p_name not in player_details:
-        player_details[p_name] = {'num_wins': 0, 'num_all_in': 1, 'rake': 0, 'win': 0, 'expense': 0}
-    else:
-        player_details[p_name]['num_all_in'] += 1
+        player_details[p_name] = dict.fromkeys(init_pd_keys, 0)
+
+    player_details[p_name]['num_all_in'] += 1
+
+def add_player_all_in_win(p_name):
+    global player_details
+    if p_name not in player_details:
+        player_details[p_name] = dict.fromkeys(init_pd_keys, 0)
+    player_details[p_name]['num_all_in_wins'] += 1
 
 def add_player_win(p_name):
+    global player_details
     if p_name not in player_details:
-        player_details[p_name] = {'num_wins': 1, 'rake': 0, 'win': 0, 'expense': 0}
-    else:
-        player_details[p_name]['num_wins'] += 1
+        player_details[p_name] = dict.fromkeys(init_pd_keys, 0)
+
+    player_details[p_name]['num_wins'] += 1
 
 def add_player_rake_share(p_name, amount):
     global player_details
-    p_name = p_name.strip()
-    amount = float(amount)
     if p_name not in player_details:
-        player_details[p_name] = {'num_wins': 0, 'num_all_in': 0, 'rake': amount, 'win': 0, 'expense': 0}
-    else:
-        player_details[p_name]['rake'] += amount
+        player_details[p_name] = dict.fromkeys(init_pd_keys, 0)
+
+    player_details[p_name]['rake'] += amount
 
 
 def add_player_profit(p_name, amount):
     global player_details
-    p_name = p_name.strip()
-    amount = float(amount)
     if p_name not in player_details:
-        player_details[p_name] = {'num_wins': 0, 'num_all_in': 0, 'win': amount, 'expense': 0, 'rake': 0}
-    else:
-        player_details[p_name]['win'] += amount
+        player_details[p_name] = dict.fromkeys(init_pd_keys, 0)
+
+    player_details[p_name]['win'] += amount
 
 
 def add_player_expense(p_name, amount):
     global player_details
-    p_name = p_name.strip()
-    amount = float(amount)
     if p_name not in player_details:
-        player_details[p_name] = {'num_wins': 0, 'num_all_in': 0, 'win': 0, 'expense': amount, 'rake': 0}
-    else:
-        player_details[p_name]['expense'] += amount
+        player_details[p_name] = dict.fromkeys(init_pd_keys, 0)
+
+    player_details[p_name]['expense'] += amount
 
 
 # helper to get command line args for input file and destination output file
@@ -99,6 +102,8 @@ def process_hand(hand_log):
     winners = []
     pre_summary = hand_log[:summary_idx]
 
+    all_in_players = set()
+
     player_action = {}
     hand_blinds = []
     player_seats = []
@@ -134,6 +139,7 @@ def process_hand(hand_log):
                     break
                 i += 1
             break
+
 
     for details in pre_summary:
         # handle the case where someone raised and nobody called them for the full amount
@@ -208,6 +214,7 @@ def process_hand(hand_log):
             latest_bet_amount = sum(last_bets[last_zero_idx:])
             if is_all_in:
                 add_player_all_in(player_name.strip())
+                all_in_players.add(player_name.strip())
 
             player_action[player_name.strip()].append(
                 amount - latest_bet_amount)
@@ -239,6 +246,8 @@ def process_hand(hand_log):
             winner_name = winner_match_obj.group(1)
            
             add_player_win(winner_name)
+            if winner_name.strip() in all_in_players:
+                add_player_all_in_win(winner_name)
 
             rest_of_details = winner_match_obj.group(2)
             winner_amount_won = re.search(
@@ -249,9 +258,12 @@ def process_hand(hand_log):
     # give back the rake to the winners
     # we just split it evenly between all winners which
     # results in fractional chips being awarded in split pot situations sometimes
-    split_rake = float(rake)/len(winners)
+    # split_rake = float(rake)/len(winners)
+    one_minus_rake_pct = 1 - float(rake)/int(total)
     for w in winners:
-        add_player_rake_share(w['name'], float(split_rake))
+        split_rake = (float(w['amount'])/one_minus_rake_pct) - float(w['amount'])
+        if (split_rake > 0):
+            add_player_rake_share(w['name'], float(split_rake))
 
     # if we had multiple winners, don't populate the "first_winner_*" keys
     # of our hand tracker and instead just record all winners semicolon delimited
@@ -309,10 +321,10 @@ def process_log(argv):
     with open(f'summary_{outputfile}', 'w') as output_summary:
         global player_details
         output_summary.write(
-            "player,hands_won,all_in_hands_count,won,lost,rake_share,net,net including rake\n")
+            "player,hands_won,all_in_hands_count,all_in_hands_won,won,lost,rake_share,net,net including rake\n")
         for (player_name, summary) in player_details.items():
             output_summary.write(
-                f"{player_name},{summary['num_wins']},{summary['num_all_in']},{summary['win']},{summary['expense']},{summary['rake']},{summary['win']-summary['expense']},{(summary['win']+summary['rake'])-summary['expense']}\n")
+                f"{player_name},{summary['num_wins']},{summary['num_all_in']},{summary['num_all_in_wins']},{summary['win']},{summary['expense']},{summary['rake']},{summary['win']-summary['expense']},{(summary['win']+summary['rake'])-summary['expense']}\n")
 
     print(f"Wrote output to {outputfile} and summary to summary_{outputfile}")
 
