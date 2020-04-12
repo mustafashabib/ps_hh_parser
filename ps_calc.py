@@ -5,12 +5,14 @@ import sys
 import getopt
 import csv
 import re
+import os
 from itertools import groupby
 
 # keep track of player's total winnings/losses/rake share
 player_details = {}
 init_pd_keys = ['num_wins', 'num_all_in_wins', 'num_all_in', 'rake', 'win', 'expense']
-   
+hands_seen = set()
+
 # helpers to add to the global player tracker
 def add_player_all_in(p_name):
     global player_details
@@ -56,13 +58,13 @@ def add_player_expense(p_name, amount):
     player_details[p_name]['expense'] += amount
 
 
-# helper to get command line args for input file and destination output file
-def get_inputfile_and_outputfile(argv):
-    inputfile = ''
-    outputfile = ''
-    expected_format = 'ps_calc.py -i "<inputfile1>" -o "<outputfile>"'
+# helper to get command line args for input file path and destination output file
+def get_inputfiles_path_and_outputfile_path(argv):
+    inputfile_path = ''
+    outputfile_path = ''
+    expected_format = 'ps_calc.py -i "<inputfile_path>" -o "<outputfile_path>"'
     try:
-        opts, _ = getopt.getopt(argv, "hi:o:", ["ifile=", "ofile="])
+        opts, _ = getopt.getopt(argv, "hi:o:", ["ifilepath=", "ofilepath="])
     except getopt.GetoptError:
         print(expected_format)
         sys.exit(2)
@@ -70,14 +72,14 @@ def get_inputfile_and_outputfile(argv):
         if opt == '-h':
             print(expected_format)
             sys.exit()
-        elif opt in ("-i", "--ifile"):
-            inputfile = arg
-        elif opt in ("-o", "--ofile"):
-            outputfile = arg
-    if inputfile == '' or outputfile == '':
+        elif opt in ("-i", "--ifilepath"):
+            inputfile_path = arg
+        elif opt in ("-o", "--ofilepath"):
+            outputfile_path = arg
+    if inputfile_path == '' or outputfile_path == '':
         print(expected_format)
         sys.exit(2)
-    return (inputfile, outputfile)
+    return (inputfile_path, outputfile_path)
 
 # process a hand
 # track blinds, people who post even not in blind position, and current bet/action for each player
@@ -92,6 +94,12 @@ def process_hand(hand_log):
     header_re = r'PokerStars Home Game Hand #(\d+):'
     match_obj = re.search(header_re, header)
     hand_id = match_obj.group(1)
+    
+    if hand_id in hands_seen:
+        return None 
+    else: 
+        hands_seen.add(hand_id)
+    
     summary_idx = hand_log.index('*** SUMMARY ***\n')
     hand_summary = hand_log[summary_idx+1:]
     pot_details = hand_summary[0]
@@ -193,8 +201,16 @@ def process_hand(hand_log):
             ) if s.replace('(', '').replace(')', '').isdigit()][-1]
             first_colon = details.index(':')
             player_name = details[:first_colon]
+            is_all_in = False
+            if 'all-in' in details.lower():
+                is_all_in = True
+            
+            if is_all_in:
+                add_player_all_in(player_name.strip())
+                all_in_players.add(player_name.strip())
 
             player_action[player_name.strip()].append(amount)
+            
         # if you raise the bet then sum all previous bets on this round and subtract from what you raised to
         # to figure out how many chips you threw in to raise the bet
         elif ' raises ' in details.lower():
@@ -292,10 +308,17 @@ def process_hand(hand_log):
 
 
 def process_log(argv):
-    (inputfile, outputfile) = get_inputfile_and_outputfile(argv)
-    all_hands = None
-    with open(inputfile) as ps_summary:
-        all_hands = ps_summary.readlines()
+    (inputfile_path, outputfile_path) = get_inputfiles_path_and_outputfile_path(argv)
+    all_hands = []
+
+    for _, _, inputfiles in os.walk(inputfile_path):
+        for inputfile in inputfiles:
+            with open(os.path.join(inputfile_path, inputfile), 'r', encoding='utf-8') as ps_summary:
+                try:
+                    all_lines = ps_summary.readlines()
+                    all_hands.extend(all_lines)
+                except Exception as e:
+                    print(f"ERROR: Skipping file {inputfile}", e)
 
     # divide list grouping on non empty/new lines
     # this effectively creates a list of lists where each element
@@ -306,19 +329,22 @@ def process_log(argv):
     hand = 1
     # process each hand in the history
     for current_hand in each_hand:
-        final_summary.append(process_hand(current_hand))
-        hand += 1
+        hand_details = process_hand(current_hand)
+        if hand_details:
+            final_summary.append(hand_details)
+            hand += 1
 
     # write out the hand raw output
     keys = final_summary[0].keys()
-    with open(outputfile, 'w') as output_csv:
+    hand_by_hand_file = os.path.join(outputfile_path, 'hand_by_hand.csv')
+    with open(hand_by_hand_file, 'w') as output_csv:
         dict_writer = csv.DictWriter(output_csv, keys)
         dict_writer.writeheader()
         dict_writer.writerows(final_summary)
 
-    # write out the summary to a file called "summary_{outputfile}" where
-    # outputfile was passed in as an argument to the script
-    with open(f'summary_{outputfile}', 'w') as output_summary:
+    # write out the summary to a file called "summary.csv" where
+    summary_file = os.path.join(outputfile_path, 'summary.csv')
+    with open(summary_file, 'w') as output_summary:
         global player_details
         output_summary.write(
             "player,hands_won,all_in_hands_count,all_in_hands_won,won,lost,rake_share,net,net including rake\n")
@@ -326,7 +352,7 @@ def process_log(argv):
             output_summary.write(
                 f"{player_name},{summary['num_wins']},{summary['num_all_in']},{summary['num_all_in_wins']},{summary['win']},{summary['expense']},{summary['rake']},{summary['win']-summary['expense']},{(summary['win']+summary['rake'])-summary['expense']}\n")
 
-    print(f"Wrote output to {outputfile} and summary to summary_{outputfile}")
+    print(f"Wrote all output to {outputfile_path}")
 
 
 """main function
