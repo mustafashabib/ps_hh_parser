@@ -123,7 +123,7 @@ def process_hand(hand_log):
     # add all seated players to the action tracker for this hand
     for details in pre_summary:
         if details.lower().startswith('seat'):
-            p_match_obj = re.search(r'^Seat (\d+): ([^\s]+) (.*)$', details)
+            p_match_obj = re.search(r'^Seat (\d+): ([^\()]+) (.*)$', details)
 
             p_name = p_match_obj.group(2).strip()
             player_action[p_name] = [0]
@@ -155,8 +155,9 @@ def process_hand(hand_log):
         if ' returned ' in details.lower():
             amount = [int(s.replace('(', '').replace(')', '')) for s in details.split(
             ) if s.replace('(', '').replace(')', '').isdigit()][-1]
-            last_space = details.rindex(' ')
-            player_name = details[last_space+1:]
+            pre_name = details.rindex(' to ')
+            player_name = details[pre_name+4:]
+            #print("player_name", player_name, details)
             player_action[player_name.strip()].append(-1 * amount)
         # when a new round of betting starts, reset everyone's current bet on the table to zero
         elif '*** show' in details.lower() or '*** flop' in details.lower() or '*** turn' in details.lower() or '*** river' in details.lower():
