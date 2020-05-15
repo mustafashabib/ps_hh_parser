@@ -12,6 +12,8 @@ from itertools import groupby
 player_details = {}
 init_pd_keys = ['num_wins', 'num_all_in_wins', 'num_all_in', 'rake', 'win', 'expense']
 hands_seen = set()
+previous_hand_chip_count = 0
+previous_hand_player_count = 0
 
 # helpers to add to the global player tracker
 def add_player_all_in(p_name):
@@ -90,6 +92,8 @@ def get_inputfiles_path_and_outputfile_path(argv):
 
 
 def process_hand(hand_log):
+    global previous_hand_chip_count
+    global previous_hand_player_count
     header = hand_log[0].strip()
     header_re = r'PokerStars Home Game Hand #(\d+):'
     match_obj = re.search(header_re, header)
@@ -121,12 +125,16 @@ def process_hand(hand_log):
     small = int(blinds.group(1))
     big = int(blinds.group(2))
     # add all seated players to the action tracker for this hand
+
+    current_hand_chip_count = 0
+    current_hand_player_count = 0
     for details in pre_summary:
         if details.lower().startswith('seat'):
-            p_match_obj = re.search(r'^Seat (\d+): ([^\()]+) (.*)$', details)
-
+            p_match_obj = re.search(r'^Seat (\d+): ([^\(\)]+) \((\d+) in chips\)$', details.strip())
             p_name = p_match_obj.group(2).strip()
             player_action[p_name] = [0]
+            current_hand_chip_count += int(p_match_obj.group(3))
+            current_hand_player_count += 1
             player_seats.append({'num': p_match_obj.group(1), 'name': p_name})
 
     # figure out who the small and big blind positions are
@@ -141,7 +149,7 @@ def process_hand(hand_log):
                         i+1) % len(player_seats)]['name'].strip()
                     big_blind = player_seats[(i+2) %
                                              len(player_seats)]['name'].strip()
-
+                    #print('small:', small_blind, 'big:', big_blind)
                     hand_blinds.append(small_blind)
                     hand_blinds.append(big_blind)
                     break
@@ -297,15 +305,22 @@ def process_hand(hand_log):
         winner_name = winners[0]['name']
         winner_amount = winners[0]['amount']
 
-    return {
+    current_hand_summary = {
         'hand_id': hand_id,
         'has_multiple_winners': has_multiple_winners,
         'first_winner_name': winner_name,
         'first_winner_amount': winner_amount,
         'all_winners': winners_collapsed,
         'total': total,
-        'rake': rake
+        'rake': rake,
+        'previous_hand_chip_count': previous_hand_chip_count,
+        'current_hand_chip_count': current_hand_chip_count,
+        'previous_hand_player_count': previous_hand_player_count,
+        'current_hand_player_count': current_hand_player_count
     }
+    previous_hand_chip_count = current_hand_chip_count
+    previous_hand_player_count = current_hand_player_count
+    return current_hand_summary
 
 
 def process_log(argv):
